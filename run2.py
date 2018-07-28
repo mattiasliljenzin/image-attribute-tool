@@ -3,38 +3,41 @@ from os import walk
 from os import stat
 from datetime import datetime, timezone
 from os.path import isfile, join
-import os.path
-import time
 from PIL import Image
 import piexif
 import os
 import exifread
 import numpy as np
 import argparse
-import os
-import platform
-import json
-import sys
-import codecs
-import ftfy
 
-# path = 'D:\\'
-#path = 'C:\\Temp\\facebook-mattiasliljenzin\\messages\\'
-#path = 'C:\\Temp\\facebook-mattiasliljenzin\\posts'
-path = 'C:\\Temp\\facebook-mattiasliljenzin\\'
-MISSING_DATE = '0000-00-00 12:00:00'
-START_DATE = datetime(2013, 2, 1, 0, 0).timestamp()
-STOP_DATE = datetime(2013, 3, 1, 0, 0).timestamp()
-count = 0
+parser = argparse.ArgumentParser()
+parser.add_argument("year")
+args = parser.parse_args()
 
+YEAR = ''
+
+if len(args.year) != 4:
+    print('Invalid arg: {}. Exiting program'.format(args.year))
+    sys.exit(0)
+else:
+    print('Valid arg: {}'.format(args.year))
+    YEAR = args.year
+
+path = 'F:\\BILDER NY\\By year\\' + YEAR
+DEFAULT_DATE = datetime.strptime('{}:01:01 12:00:00'.format(YEAR), '%Y:%m:%d %H:%M:%S')
+DEFAULT_DATE_STR = DEFAULT_DATE.strftime('%Y:%m:%d %H:%M:%S')
+DTO_KEY = piexif.ExifIFD.DateTimeOriginal
+MISSING_DATE_PATTERN = '0000:00:00 00:00:00'
+
+print(DEFAULT_DATE)
 
 def getFiles(directory):
-
+    
     files = []
 
     for (dirpath, dirnames, filenames) in walk(directory):
 
-        for file in filenames:
+        for file in filenames: 
             fullpath = "{}\\{}".format(dirpath, file)
             files.append(fullpath)
 
@@ -42,99 +45,51 @@ def getFiles(directory):
             for file in getFiles(dir):
                 fullpath = "{}\\{}\\{}".format(dirpath, dir, file)
                 files.append(fullpath)
-
+        
     return files
 
-
-def getWithinDateRangeForLastModified(files):
+def adjustDates(files):
 
     missing_date = []
 
     for filepath in files:
-
-        obj = {}
-        obj['filepath'] = filepath
-        obj['lm'] = MISSING_DATE
-
+        
         try:
-            tm = os.path.getmtime(filepath)
+            print(' ')
+            print(filepath)
+            
+            im = Image.open(filepath)
+            exif_dict = piexif.load(im.info["exif"])
+            date_taken = DEFAULT_DATE_STR
 
-            if (tm > START_DATE and tm < STOP_DATE):
-                obj['lm'] = datetime.fromtimestamp(tm)
-                missing_date.append(obj)
-
+            if DTO_KEY in exif_dict["Exif"]:
+                dto = exif_dict["Exif"][DTO_KEY].decode()
+                if dto != MISSING_DATE_PATTERN: 
+                    date_taken = dto
+            
+            exif_dict["Exif"].update({DTO_KEY: date_taken.encode()})
+            exif_bytes = piexif.dump(exif_dict)
+            im.save(filepath, exif=exif_bytes)
+            
+            st = os.stat(filepath)
+            mtime = st[8]
+            ctime = st[9]
+            new_timestamp = datetime.strptime(date_taken, '%Y:%m:%d %H:%M:%S').timestamp()
+            os.utime(filepath, (mtime, new_timestamp))
         except:
             print('Error when processing {}'.format(filepath))
-            missing_date.append(obj)
+            missing_date.append(filepath)
 
     return missing_date
 
-
-def getWithinDateRangeForJson(files):
-
-    storage = []
-
-    for filepath in files:
-
-        found_match = False
-
-        if filepath.endswith('.json'):
-            print(filepath)
-            try:
-                with codecs.open(filepath, encoding='utf-8') as f:
-                    content = f.readlines()
-                    for c in content:
-                        if "timestamp" in c:
-                            
-                            ts = int(c.strip().strip(',').split(':')[1])
-
-                            try:
-                                if (ts > 10000000000):
-                                    ts = ts / 1000
-                                
-                                #tm = datetime.fromtimestamp(int(ts))
-
-                                if (ts > 1 and ts > START_DATE and ts < STOP_DATE):
-                                    found_match = True
-                                #     print('Found timestamp within range')
-                                #     print(tm)
-                                # else:
-                                #     print('timestamp outside range')
-                                #     print(tm)
-                                
-
-                            except ValueError as e:
-                                print(e)
-
-                if found_match is True:
-                    storage.append(filepath)
-
-            except Exception as e: 
-                print("[Error]: {} ({})".format(e, filepath))
-                storage.append({})
-
-    return storage
-
-
-def to_data(data):
-    if isinstance(data, dict):
-        for key, value in data.items():
-            return to_data(value)
-    elif isinstance(value, list) or isinstance(value, tuple):
-        for v in value:
-            return to_data(v)
-    else:
-        return data
-
 files = np.array(getFiles(path))
-files_error = getWithinDateRangeForJson(files)
+files_error = adjustDates(files)
 
 print(' ')
 print(' ')
-print('=== Files within range ===')
+print('=== Files with error ===')
 for f in files_error:
     print(f)
-
 
 
 
